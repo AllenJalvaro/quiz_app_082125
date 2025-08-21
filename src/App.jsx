@@ -1,9 +1,12 @@
+
 import { useState, useRef, useEffect } from "react";
 
 const App = () => {
   const [quizData, setQuizData] = useState([]);
   const [fileName, setFileName] = useState("");
   const [error, setError] = useState("");
+  const [userAnswers, setUserAnswers] = useState([]);
+  const [showResults, setShowResults] = useState(false);
   const fileInputRef = useRef(null);
 
   const loadScripts = () => {
@@ -20,7 +23,6 @@ const App = () => {
       ];
 
       let loadedCount = 0;
-
       const checkCompletion = () => {
         loadedCount++;
         if (loadedCount === scriptsToLoad.length) {
@@ -58,6 +60,8 @@ const App = () => {
 
     setFileName(file.name);
     setError("");
+    setUserAnswers([]);
+    setShowResults(false);
 
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -65,7 +69,10 @@ const App = () => {
       let parsedData = [];
 
       if (file.name.endsWith(".csv")) {
-        const results = Papa.parse(data, { header: true, skipEmptyLines: true });
+        const results = Papa.parse(data, {
+          header: true,
+          skipEmptyLines: true,
+        });
         parsedData = results.data;
       } else if (file.name.endsWith(".xlsx")) {
         const workbook = XLSX.read(data, { type: "binary" });
@@ -113,6 +120,8 @@ const App = () => {
         });
 
         setQuizData(formattedQuiz);
+        // Initialize user answers with null values
+        setUserAnswers(new Array(formattedQuiz.length).fill(null));
       } catch (err) {
         setError(err.message);
         setQuizData([]);
@@ -126,53 +135,71 @@ const App = () => {
     setQuizData([]);
     setFileName("");
     setError("");
+    setUserAnswers([]);
+    setShowResults(false);
     if (fileInputRef.current) {
       fileInputRef.current.value = null;
     }
   };
 
-  const QuizQuestion = ({ question, answerOptions, rationale }) => {
-    const [selectedAnswer, setSelectedAnswer] = useState(null);
-    const [showRationale, setShowRationale] = useState(false);
-
-    const handleAnswerClick = (index) => {
-      setSelectedAnswer(index);
-      setShowRationale(true);
+  const handleAnswerSelect = (questionIndex, answerIndex, isCorrect) => {
+    const newUserAnswers = [...userAnswers];
+    newUserAnswers[questionIndex] = {
+      answerIndex,
+      isCorrect,
     };
+    setUserAnswers(newUserAnswers);
+
+    // Check if all questions have been answered
+    const allAnswered = newUserAnswers.every(answer => answer !== null);
+    if (allAnswered) {
+      setShowResults(true);
+    }
+  };
+
+  const calculateScore = () => {
+    const correctCount = userAnswers.filter(answer => answer.isCorrect).length;
+    return {
+      correct: correctCount,
+      total: quizData.length,
+      percentage: Math.round((correctCount / quizData.length) * 100)
+    };
+  };
+
+  const resetQuiz = () => {
+    setUserAnswers(new Array(quizData.length).fill(null));
+    setShowResults(false);
+  };
+
+  const QuizQuestion = ({ question, answerOptions, rationale, index }) => {
+    const selectedAnswer = userAnswers[index];
+    const showRationale = selectedAnswer !== null;
 
     return (
       <div className="bg-white rounded-lg shadow-md p-6 mb-8 border border-gray-200">
         <h3 className="text-xl font-bold text-gray-800 mb-4">{question}</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {answerOptions.map((option, index) => (
+          {answerOptions.map((option, optionIndex) => (
             <button
-              key={index}
-              onClick={() => handleAnswerClick(index)}
-              className={`
-                w-full text-left p-4 rounded-lg transition-colors duration-200
-                ${
-                  selectedAnswer === null
-                    ? "bg-gray-100 hover:bg-gray-200"
-                    : ""
-                }
-                ${
-                  selectedAnswer !== null && option.isCorrect
-                    ? "bg-green-500 text-white"
-                    : ""
-                }
-                ${
-                  selectedAnswer === index && !option.isCorrect
-                    ? "bg-red-500 text-white"
-                    : ""
-                }
-                ${
-                  selectedAnswer !== null &&
+              key={optionIndex}
+              onClick={() => handleAnswerSelect(index, optionIndex, option.isCorrect)}
+              className={`w-full text-left p-4 rounded-lg transition-colors duration-200 ${selectedAnswer === null
+                ? "bg-gray-100 hover:bg-gray-200"
+                : ""
+                } ${selectedAnswer !== null && option.isCorrect
+                  ? "bg-green-500 text-white"
+                  : ""
+                } ${selectedAnswer !== null &&
+                  selectedAnswer.answerIndex === optionIndex &&
+                  !option.isCorrect
+                  ? "bg-red-500 text-white"
+                  : ""
+                } ${selectedAnswer !== null &&
                   !option.isCorrect &&
-                  selectedAnswer !== index
-                    ? "bg-gray-100 opacity-60"
-                    : ""
-                }
-              `}
+                  selectedAnswer.answerIndex !== optionIndex
+                  ? "bg-gray-100 opacity-60"
+                  : ""
+                }`}
               disabled={selectedAnswer !== null}
             >
               {option.text}
@@ -181,17 +208,62 @@ const App = () => {
         </div>
         {showRationale && (
           <div
-            className={`mt-4 p-4 rounded-lg ${
-              selectedAnswer !== null &&
-              answerOptions[selectedAnswer].isCorrect
-                ? "bg-green-100 text-green-700"
-                : "bg-red-100 text-red-700"
-            }`}
+            className={`mt-4 p-4 rounded-lg ${selectedAnswer.isCorrect
+              ? "bg-green-100 text-green-700"
+              : "bg-red-100 text-red-700"
+              }`}
           >
             <p className="font-semibold">Rationale:</p>
             <p>{rationale}</p>
           </div>
         )}
+      </div>
+    );
+  };
+
+  const ResultsSummary = () => {
+    const score = calculateScore();
+
+    return (
+      <div className="bg-white rounded-lg shadow-md p-6 mb-8 border border-gray-200">
+        <h2 className="text-2xl font-bold text-center text-gray-800 mb-6">
+          Quiz Results
+        </h2>
+        <div className="text-center mb-6">
+          <div className="text-4xl font-bold mb-2">
+            {score.correct} / {score.total}
+          </div>
+          <div className="text-lg text-gray-600">
+            {score.percentage}% Correct
+          </div>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+          {quizData.map((question, index) => {
+            const userAnswer = userAnswers[index];
+            const isCorrect = userAnswer.isCorrect;
+
+            return (
+              <div
+                key={index}
+                className={`p-4 rounded-lg ${isCorrect ? "bg-green-100" : "bg-red-100"
+                  }`}
+              >
+                <p className="font-semibold">
+                  Q{index + 1}: {isCorrect ? "✓" : "✗"}
+                </p>
+                <p className="text-sm mt-1">{question.question}</p>
+              </div>
+            );
+          })}
+        </div>
+        <div className="text-center">
+          <button
+            onClick={resetQuiz}
+            className="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-6 rounded-lg transition-colors duration-200"
+          >
+            Retry Quiz
+          </button>
+        </div>
       </div>
     );
   };
@@ -250,7 +322,9 @@ const App = () => {
                   </label>
                   <p className="pl-1">or drag and drop</p>
                 </div>
-                <p className="text-xs text-gray-500">CSV or XLSX up to 10MB</p>
+                <p className="text-xs text-gray-500">
+                  CSV or XLSX up to 10MB
+                </p>
               </div>
             </div>
             {fileName && (
@@ -273,7 +347,7 @@ const App = () => {
             </div>
           )}
 
-          {quizData.length > 0 && (
+          {quizData.length > 0 && !showResults && (
             <div className="bg-gray-50 p-6 rounded-lg">
               <h2 className="text-2xl font-bold text-center text-gray-900 mb-6">
                 Your Quiz
@@ -282,6 +356,7 @@ const App = () => {
                 {quizData.map((q, index) => (
                   <QuizQuestion
                     key={index}
+                    index={index}
                     question={q.question}
                     answerOptions={q.answerOptions}
                     rationale={q.rationale}
@@ -290,6 +365,8 @@ const App = () => {
               </div>
             </div>
           )}
+
+          {showResults && <ResultsSummary />}
         </div>
       </div>
     </div>
@@ -297,3 +374,4 @@ const App = () => {
 };
 
 export default App;
+
